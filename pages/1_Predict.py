@@ -1,20 +1,31 @@
+# pages/1_Predict.py
 import streamlit as st
 import pandas as pd
 import joblib
-from utils.db_manager import save_history  # Make sure this path is correct
-
-# Load model
-model = joblib.load("model.pkl")
-
-vaccine_map = {"Covaxin": 0, "Covishield": 1, "Pfizer": 2, "None": 3}
+from utils.db_manager import save_history
 
 st.title("🔍 Post-COVID Heart Risk & Insurance Estimator")
 
+# Gate: must be logged in
 if not st.session_state.get("logged_in", False):
-    st.warning("🔒 Please log in to access the prediction tool.")
+    st.warning("🔒 Please log in on the **0_Login** page to access the prediction tool.")
     st.stop()
 
 email = st.session_state.get("email", "guest@demo.com")
+
+# Lazy-load model with helpful error
+@st.cache_resource(show_spinner=False)
+def load_model(path="model.pkl"):
+    return joblib.load(path)
+
+try:
+    model = load_model("model.pkl")
+except Exception as e:
+    st.error(f"Failed to load `model.pkl`. Details: {e}")
+    st.info("Confirm scikit-learn/joblib versions match those used when saving the model.")
+    st.stop()
+
+vaccine_map = {"Covaxin": 0, "Covishield": 1, "Pfizer": 2, "None": 3}
 
 with st.form("risk_form"):
     st.subheader("🧑‍⚕️ Basic Health Information")
@@ -38,7 +49,8 @@ with st.form("risk_form"):
     submit = st.form_submit_button("🔍 Predict My Risk")
 
 if submit:
-    input_data = pd.DataFrame([{
+    # Ensure feature order matches the trained model
+    row = {
         "Age": age,
         "RestingBP": resting_bp,
         "Cholesterol": cholesterol,
@@ -51,68 +63,55 @@ if submit:
         "Vaccine_Type": vaccine_map[vaccine_type],
         "Doses": doses,
         "Days_Since_Vaccine": days_since_vaccine
-    }], columns=model.feature_names_in_)  # enforce order and names
+    }
 
-    
-
-    risk_score = model.predict_proba(input_data)[0][1]
-    prediction = 1 if risk_score > 0.5 else 0
-
-    if risk_score > 0.75:
-        tier = "🚨 Premium"
-        coverage = "₹2 – ₹5 Lakh"
-        premium = "₹10,000+"
-    elif risk_score > 0.4:
-        tier = "⚠️ Standard"
-        coverage = "₹5 – ₹10 Lakh"
-        premium = "₹6,000 – ₹9,000"
+    if hasattr(model, "feature_names_in_"):
+        input_df = pd.DataFrame([row], columns=model.feature_names_in_)
     else:
-        tier = "✅ Basic"
-        coverage = "₹10 – ₹15 Lakh"
-        premium = "₹4,000 – ₹6,000"
+        input_df = pd.DataFrame([row])
 
-    if prediction == 1:
+    prob = float(model.predict_proba(input_df)[0][1])
+    pred = 1 if prob > 0.5 else 0
+
+    if prob > 0.75:
+        tier, coverage, premium = "🚨 Premium", "₹2 – ₹5 Lakh", "₹10,000+"
+    elif prob > 0.4:
+        tier, coverage, premium = "⚠️ Standard", "₹5 – ₹10 Lakh", "₹6,000 – ₹9,000"
+    else:
+        tier, coverage, premium = "✅ Basic", "₹10 – ₹15 Lakh", "₹4,000 – ₹6,000"
+
+    if pred == 1:
         st.markdown(f"""
-            <div style='background-color: #ffe5e5; padding: 20px; border-radius: 10px; text-align: center;'>
-                <h2 style='color: red;'>⚠️ High Risk</h2>
-                <p>Your heart risk after COVID is high. Risk Score: <strong>{risk_score:.2f}</strong><br>
-                Please consult a doctor immediately.</p>
-            </div>
+        <div style='background:#ffe5e5;padding:20px;border-radius:10px;text-align:center;'>
+            <h2 style='color:red;'>⚠️ High Risk</h2>
+            <p>Risk Score: <strong>{prob:.2f}</strong>. Please consult a doctor.</p>
+        </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown(f"""
-            <div style='background-color: #e6ffed; padding: 20px; border-radius: 10px; text-align: center;'>
-                <h2 style='color: green;'>✅ Low Risk</h2>
-                <p>You are likely at low risk. Risk Score: <strong>{risk_score:.2f}</strong></p>
-            </div>
+        <div style='background:#e6ffed;padding:20px;border-radius:10px;text-align:center;'>
+            <h2 style='color:green;'>✅ Low Risk</h2>
+            <p>Risk Score: <strong>{prob:.2f}</strong></p>
+        </div>
         """, unsafe_allow_html=True)
 
     st.markdown(f"""
-    <br>
-    <div style='background-color:#f1f3f6; padding:20px; border-radius:10px;'>
-        <h3>🛡 Recommended Insurance Plan</h3>
-        <ul>
-            <li><strong>Policy Tier:</strong> {tier}</li>
-            <li><strong>Coverage Level:</strong> {coverage}</li>
-            <li><strong>Estimated Premium:</strong> {premium}</li>
-        </ul>
+    <div style='background:#f1f3f6;padding:20px;border-radius:10px;'>
+      <h3>🛡 Recommended Insurance Plan</h3>
+      <ul>
+        <li><strong>Policy Tier:</strong> {tier}</li>
+        <li><strong>Coverage:</strong> {coverage}</li>
+        <li><strong>Estimated Premium:</strong> {premium}</li>
+      </ul>
     </div>
     """, unsafe_allow_html=True)
 
-    save_data = input_data.iloc[0].to_dict()
-
-# Ensure these keys exist in save_data (sometimes they may get lost if columns mismatch)
-    save_data["Risk_Score"] = risk_score
-    save_data["Prediction"] = prediction
-    save_data["Tier"] = tier
-    save_data["Coverage"] = coverage
-    save_data["Premium"] = premium
-
-# Also explicitly add doses and days since vaccine from your variables:
-    save_data["Doses"] = doses
-    save_data["Days_Since_Vaccine"] = days_since_vaccine
-
-
-
-
-    save_history(email, save_data)
+    out = dict(row)
+    out.update({
+        "Risk_Score": prob,
+        "Prediction": pred,
+        "Tier": tier,
+        "Coverage": coverage,
+        "Premium": premium
+    })
+    save_history(email, out)
