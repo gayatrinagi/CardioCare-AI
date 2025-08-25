@@ -7,6 +7,7 @@ An AI-powered **post-COVID health screening tool** built with **Streamlit**, int
 - 🔐 **Login / Sign up system** with user history tracking
 - 📊 **Insurance estimator** (experimental) based on predicted risk
 
+Try it here -> https://cardiocare-ai.streamlit.app/
 ⚠️ **Disclaimer:** This project is for **research and educational purposes only**.  
 It is **not a medical device** and should not be used as a substitute for professional medical advice.
 
